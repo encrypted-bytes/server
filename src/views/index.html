@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="assets/css/normalize.css"/>
+    <link rel="stylesheet" href="assets/css/sakura-dark.css" media="screen" />
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <title><%= hostName %></title>
+</head>
+<body style="background-color: #222222;">
+    <h1><%= hostName %></h1>
+      <p>[<a href="#">source code</a>] [<a href="mailto:storage@joey.cloud">contact</a>] [<%= stats.fileCount %> files] [<%= stats.totalSize %>GB]</p>
+    <blockquote>
+        <p>“The only way to keep a secret is to never have one.”<br><small>— <a href="https://www.goodreads.com/quotes/899649-the-only-way-to-keep-a-secret-is-to-never">Julian Assange</a></small></p>
+    </blockquote>
+    <hr>
+    <h2>Upload</h2>
+    <form action="/upload" method="post" enctype="multipart/form-data">
+        <input type="file" name="file"/>
+        <select name="retention">
+            <option selected>Forever ∞</option>
+            <option value="30">30 days</option>
+            <option value="7">7 days</option>
+            <option value="3">3 days</option>
+            <option value="1">1 day</option>
+            <option value="0">15 minutes</option>
+        </select>
+        <button type="submit">Upload</button>
+      </form>
+    <hr>
+    <h3>Info</h3>
+    <ul>
+        <li><%= maxSize %> GB file size limit</li>
+        <li>Files are encrypted using AES-256-CBC before saving to disk.</li>
+        <li>No logs or decryption keys are stored by us.</li>
+    </ul>
+    <small><strong>2024-08-14</strong> Release.</small>
+</body>
+</html>

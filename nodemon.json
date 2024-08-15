@@ -1,0 +1,8 @@
+{
+    "ignore": [
+        "files",
+        "temp",
+        "cleanup.lock",
+        "src/stats.json"
+    ]
+}

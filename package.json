@@ -1,0 +1,28 @@
+{
+  "name": "uploader",
+  "version": "0.0.1",
+  "description": "",
+  "main": "src/app.js",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon src/app.js",
+    "prod": "pm2 --name uploader start src/app.js",
+    "stop": "pm2 stop uploader",
+    "restart": "pm2 restart uploader"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@fastify/csrf-protection": "^6.4.1",
+    "@fastify/multipart": "^8.3.0",
+    "@fastify/secure-session": "^7.5.1",
+    "@fastify/static": "^7.0.4",
+    "@fastify/view": "^9.1.0",
+    "dotenv": "^16.4.5",
+    "ejs": "^3.1.10",
+    "fastify": "^4.28.1",
+    "node-cron": "^3.0.3",
+    "point-of-view": "^6.3.0"
+  }
+}

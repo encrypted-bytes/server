@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="assets/css/normalize.css"/>
+    <link rel="stylesheet" href="assets/css/sakura-dark.css" media="screen" />
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <title><%= hostName %></title>
+</head>
+<body style="background-color: #222222;">
+    <h1><%= hostName %></h1>
+    <p>[<a href="#">source code</a>] [<a href="mailto:storage@joey.cloud">contact</a>] [<%= stats.fileCount %> files] [<%= stats.totalSize %>GB]</p>
+    <blockquote>
+      <p>“The only way to keep a secret is to never have one.”<br><small>— <a href="https://www.goodreads.com/quotes/899649-the-only-way-to-keep-a-secret-is-to-never">Julian Assange</a></small></p>
+    </blockquote>
+    <hr>
+    <h2>File uploaded!</h2>
+    <textarea rows="8" readonly><%= downloadLink %></textarea>
+</body>
+</html>
