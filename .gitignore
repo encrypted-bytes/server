@@ -1,4 +1,5 @@
 files
+temp
 ssl
 .env
 node_modules
