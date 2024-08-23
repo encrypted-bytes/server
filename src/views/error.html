@@ -21,22 +21,8 @@
                     Assange</a></small></p>
     </blockquote>
     <hr>
-    <h2>Upload</h2>
-    <form action="/upload" method="post" enctype="multipart/form-data">
-        <input type="file" name="file" />
-        <button type="submit">Upload</button>
-    </form>
-    <hr>
-    <h3>Info</h3>
-    <ul>
-        <li>
-            <%= maxSize %> GB file size limit
-        </li>
-        <li>Files are encrypted using AES-256-CBC before saving to disk.</li>
-        <li>No logs or decryption keys are stored by us.</li>
-    </ul>
-    <small><strong>2024-08-23</strong> Removed temp file uploading and implemented file streaming to disk for better
-        performance.</small>
+    <h2>Error!</h2>
+    <textarea rows="8" readonly><%= errorMessage %></textarea>
 </body>
 
 </html>

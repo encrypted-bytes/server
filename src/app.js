@@ -10,12 +10,33 @@ import pointOfView from '@fastify/view';
 import ejs from 'ejs';
 import cron from 'node-cron';
 import cleanup from './cron/cleanup.js';
+import { pipeline } from 'stream/promises';
+import { createWriteStream, createReadStream } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const fastify = Fastify({ logger: process.env.SERVER_ENV === 'DEV' ? true : false, maxParamLength: 1000 });
 const serverSecretKey = crypto.createHash('sha256').update(process.env.SERVER_SECRET_KEY).digest();
+
+const tempDir = path.join(__dirname, '../temp');
+const filesDir = path.join(__dirname, '../files');
+
+let httpsOptions;
+let isHttps = true;
+try {
+  httpsOptions = {
+    key: fs.readFileSync(__dirname + '/../ssl/privkey.pem'),
+    cert: fs.readFileSync(__dirname + '/../ssl/cert.pem')
+  };
+} catch (error) {
+  console.error(error);
+  console.warn('SSL certificates not found or invalid. Falling back to HTTP.');
+}
+const fastify = Fastify({
+  logger: process.env.SERVER_ENV === 'DEV' ? true : false,
+  maxParamLength: 1000,
+  https: process.env.SERVER_ENV === 'DEV' ? undefined : isHttps ? httpsOptions : undefined
+});
 
 fastify.register(pointOfView, {
   engine: {
@@ -41,7 +62,11 @@ fastify.get('/favicon.ico', async (request, reply) => {
 });
 
 fastify.get('/', async (request, reply) => {
-  return reply.view('index.html', { hostName: request.headers.host, maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
+  return reply.view('index.html', { maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
+});
+
+fastify.setNotFoundHandler((request, reply) => {
+  return reply.redirect('/');
 });
 
 const getStats = async () => {
@@ -57,138 +82,74 @@ const getStats = async () => {
   }
 };
 
-const handleFileUpload = async (buffer, originalName, retention) => {
-  const password = randomBytes(32).toString('hex');
-  const iv = randomBytes(16);
-  const cipher = createCipheriv('aes-256-cbc', Buffer.from(password, 'hex'), iv);
-  const encryptedBuffer = Buffer.concat([cipher.update(buffer), cipher.final()]);
-
-  let hash = crypto.createHash('sha256').update(encryptedBuffer).digest('hex').slice(0, 10);
-  let filePath = path.join(__dirname, '../files', retention ? `${retention}_${hash}` : hash);
-
-  while (fs.existsSync(filePath)) {
-    const randomBytes = crypto.randomBytes(4).toString('hex');
-    hash = crypto.createHash('sha256').update(encryptedBuffer).update(randomBytes).digest('hex').slice(0, 10);
-    filePath = path.join(__dirname, '../files', retention ? `${retention}_${hash}` : hash);
-  }
-
-  const ext = path.extname(originalName);
-  //const baseName = path.basename(originalName, ext);
-  const finalName = ext ? `${hash}${ext}` : hash; // Use baseName if no extension
-
-  const dataToEncrypt = `${hash}:${iv.toString('hex')}:${retention || ''}:${finalName}`;
-  const encryptedData = encryptData(dataToEncrypt, serverSecretKey);
-  return { filePath, encryptedData, encryptedBuffer, password };
-};
-
-const encryptData = (data, key) => {
-  const iv = randomBytes(16);
-  const cipher = createCipheriv('aes-256-cbc', key, iv);
-  const encrypted = Buffer.concat([cipher.update(data, 'utf8'), cipher.final()]);
-  return iv.toString('hex') + ':' + encrypted.toString('hex');
-};
-
-const decryptData = (encryptedData, key) => {
-  const [ivHex, encryptedHex] = encryptedData.split(':');
-  const iv = Buffer.from(ivHex, 'hex');
-  const encrypted = Buffer.from(encryptedHex, 'hex');
-  const decipher = createDecipheriv('aes-256-cbc', key, iv);
-  const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-  return decrypted.toString('utf8');
-};
 
 fastify.post('/upload', async (request, reply) => {
-    const data = await request.file();
-    const buffer = await data.toBuffer();
-    if(buffer.length === 0) {
-        throw new CustomError('No file uploaded', 400);
-    }
-    const retention = (data.fields.retention && [0, 1, 3, 7, 30].includes(parseInt(data.fields.retention.value))) ? data.fields.retention.value : null;
+  const data = await request.file();
+  if (!data) {
+    return reply.code(400).send('No file provided');
+  };
 
-    const { filePath, encryptedData, encryptedBuffer, password } = await handleFileUpload(buffer, data.filename, retention);
-    await fs.promises.writeFile(filePath, encryptedBuffer);
+  const fileName = randomBytes(16).toString('hex');
+  const fileKey = randomBytes(32);
+  const fileIV = randomBytes(16);
+  const fileCipher = createCipheriv('aes-256-cbc', fileKey, fileIV);
 
-    const userAgent = request.headers['user-agent'];
-    const downloadLink = `https://${request.headers.host}/download/${encodeURIComponent(encryptedData)}/${encodeURIComponent(password)}`;
-    
-    if (userAgent && (userAgent.includes('curl') || userAgent.includes('wget'))) {
-      return reply.status(201).send(downloadLink);
-    } else {
-      return reply.status(201).view('upload.html', { downloadLink, hostName: request.headers.host, maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
-    }
-});
+  const fileTempPath = path.join(tempDir, `${randomBytes(16).toString('hex')}`);
 
-fastify.get('/download/:encryptedData/:encryptionKey', async (request, reply) => {
-  const { encryptedData, encryptionKey } = request.params;
-  let decodedString;
   try {
-    decodedString = decryptData(decodeURIComponent(encryptedData), serverSecretKey);
+    await fs.promises.mkdir(tempDir, { recursive: true });
+    await fs.promises.mkdir(filesDir, { recursive: true });
+    await pipeline(
+      data.file,
+      fileCipher,
+      createWriteStream(fileTempPath)
+    );
+    await fs.promises.rename(fileTempPath, path.join(filesDir, fileName));
+
+    const dataToEncrypt = JSON.stringify({ fileName: fileName, fileExtension: path.extname(data.filename) });
+    const dataIV = randomBytes(16);
+    const dataCipher = createCipheriv('aes-256-cbc', Buffer.from(serverSecretKey), dataIV);
+    let encryptedFileData = dataCipher.update(dataToEncrypt, 'utf8', 'hex');
+    encryptedFileData += dataCipher.final('hex');
+
+    return reply.status(201).view('upload.html', { downloadLink: (isHttps ? 'https' : 'http') + `://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`, maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
   } catch (error) {
-    throw new CustomError('Invalid encrypted data', 400);
+    return reply.code(500).view('error.html', { errorMessage: 'File upload failed', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
   }
-  const [decodedFilename, ivHex, retention, ext] = decodedString.split(':');
-  if (!decodedFilename || !ivHex || !ext) {
-    throw new CustomError('Invalid data provided', 400);
-  }
-  const filePath = path.join(__dirname, '../files', retention ? `${retention}_${decodedFilename}` : decodedFilename);
+});
 
-  if (fs.existsSync(filePath)) {
-    let encryptedBuffer;
-    try {
-      encryptedBuffer = await fs.promises.readFile(filePath);
-    } catch (error) {
-      throw new CustomError('File read failed');
-    }
+fastify.get('/download/:fileEncryptionKey/:fileIV/:encryptedFileData/:dataIV', async (request, reply) => {
+  const { fileEncryptionKey, fileIV, encryptedFileData, dataIV } = request.params;
+
+  try {
+    const dataDecipher = createDecipheriv('aes-256-cbc', Buffer.from(serverSecretKey), Buffer.from(dataIV, 'hex'));
+    let decryptedData = dataDecipher.update(encryptedFileData, 'hex', 'utf8');
+    decryptedData += dataDecipher.final('utf8');
+    const { fileName, fileExtension } = JSON.parse(decryptedData);
 
     try {
-      const iv = Buffer.from(ivHex, 'hex');
-      const decipher = createDecipheriv('aes-256-cbc', Buffer.from(encryptionKey, 'hex'), iv);
-      const decryptedBuffer = Buffer.concat([decipher.update(encryptedBuffer), decipher.final()]);
+      const fileKey = Buffer.from(fileEncryptionKey, 'hex');
+      const fileIVBuffer = Buffer.from(fileIV, 'hex');
+      const fileDecipher = createDecipheriv('aes-256-cbc', fileKey, fileIVBuffer);
+      const filePath = path.join(filesDir, fileName);
+      if (!fs.existsSync(filePath)) {
+        return reply.code(500).view('error.html', { errorMessage: 'This file has been removed', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
+      }
 
-      reply.header('Content-Disposition', `attachment; filename=${decodedFilename}${ext}`);
-      return reply.send(decryptedBuffer);
+      reply.header('Content-Disposition', `attachment; filename="${fileName + fileExtension}"`);
+      reply.type('application/octet-stream');
+      const readStream = createReadStream(filePath);
+      return reply.send(readStream.pipe(fileDecipher));
     } catch (error) {
-      throw new CustomError('Decryption failed', 403);
+      return reply.code(400).view('error.html', { errorMessage: 'Invalid file data given', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
     }
-  } else {
-    console.log(filePath);
-    throw new CustomError('File not found', 404);
+  } catch (er) {
+    return reply.code(500).view('error.html', { errorMessage: 'File decryption failed', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
   }
 });
-
-fastify.setNotFoundHandler((request, reply) => {
-  return reply.redirect('/');
-});
-
-fastify.setErrorHandler((error, request, reply) => {
-  if (error.validation) {
-    return reply.status(400).send('Validation error');
-  }
-
-  if(error.code === 'FST_REQ_FILE_TOO_LARGE') {
-    return reply.status(413).send('File too large');
-  }
-
-  if(error instanceof CustomError) {
-    return reply.status(error.statusCode).send(error.message);
-  }
-  
-  console.log(error);
-  
-  return reply.status(500).send('An unexpected error occurred');
-});
-
-class CustomError extends Error {
-  constructor(message, statusCode = 500) {
-    super(message);
-    this.name = 'CustomError';
-    this.statusCode = statusCode;
-  }
-}
 
 const cleanupInstance = new cleanup();
 cron.schedule('* * * * *', () => {
-  console.log('Running cleanup job');
   cleanupInstance.run();
 }, {
   scheduled: true
@@ -196,7 +157,12 @@ cron.schedule('* * * * *', () => {
 
 const start = async () => {
   try {
-    fastify.listen({ port: 5000 });
+    const port = process.env.SERVER_ENV === 'DEV' ? 5000 : isHttps ? 443 : 80;
+    await fastify.listen({
+      port: port,
+      host: '0.0.0.0'
+    });
+    console.log(`Server is running on port ${port}`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

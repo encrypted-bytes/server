@@ -35,30 +35,7 @@ export default class cleanup {
 
             const fileAge = now - fileStat.mtimeMs;
 
-            let maxAge = Infinity;
-            if (file.includes('_')) {
-                const [ageIndicator] = file.split('_');
-
-                switch (parseInt(ageIndicator, 10)) {
-                    case 0:
-                        maxAge = 15 * 60 * 1000;
-                        break;
-                    case 1:
-                        maxAge = 24 * 60 * 60 * 1000;
-                        break;
-                    case 3:
-                        maxAge = 3 * 24 * 60 * 60 * 1000;
-                        break;
-                    case 7:
-                        maxAge = 7 * 24 * 60 * 60 * 1000;
-                        break;
-                    case 30:
-                        maxAge = 30 * 24 * 60 * 60 * 1000;
-                        break;
-                }
-            }
-
-            if (fileAge > maxAge) {
+            if (fileAge > this.THREE_DAYS) {
                 await this.unlink(filePath);
                 console.log(`Deleted: ${filePath}`);
             }
@@ -92,8 +69,6 @@ export default class cleanup {
             }
 
             await writeFile(LOCK_FILE, 'lock');
-
-            await this.removeOldFiles(this.FILES_DIR);
 
             await this.removeOldFiles(this.TEMP_DIR, this.THREE_DAYS);
 
