@@ -35,6 +35,10 @@
         <li>Files are encrypted using AES-256-CBC before saving to disk.</li>
         <li>No logs or decryption keys are stored by us.</li>
     </ul>
+    <blockquote>
+        <p>Upload using CURL:</p>
+        <small>curl -X POST -H "Content-Type: multipart/form-data" -F "file=@****" https://encrypted-bytes.com/upload</small>
+    </blockquote>
     <small><strong>2024-08-23</strong> Removed temp file uploading and implemented file streaming to disk for better
         performance.</small>
 </body>

@@ -12,6 +12,7 @@ import cron from 'node-cron';
 import cleanup from './cron/cleanup.js';
 import { pipeline } from 'stream/promises';
 import { createWriteStream, createReadStream } from 'fs';
+import http from 'http';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -112,6 +113,10 @@ fastify.post('/upload', async (request, reply) => {
     let encryptedFileData = dataCipher.update(dataToEncrypt, 'utf8', 'hex');
     encryptedFileData += dataCipher.final('hex');
 
+    if (request.headers['user-agent'].toLowerCase().includes('curl')) {
+      return reply.status(201).send((isHttps ? 'https' : 'http') + `://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`);
+    }
+
     return reply.status(201).view('upload.html', { downloadLink: (isHttps ? 'https' : 'http') + `://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`, maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
   } catch (error) {
     return reply.code(500).view('error.html', { errorMessage: 'File upload failed', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
@@ -157,6 +162,14 @@ cron.schedule('* * * * *', () => {
 
 const start = async () => {
   try {
+    if (process.env.SERVER_ENV !== 'DEV' && isHttps) {
+      http.createServer((req, res) => {
+        res.writeHead(301, { "Location": "https://" + req.headers['host'] + req.url });
+        res.end();
+      }).listen(80);
+      console.log('HTTP redirect server running on port 80');
+    }
+
     const port = process.env.SERVER_ENV === 'DEV' ? 5000 : isHttps ? 443 : 80;
     await fastify.listen({
       port: port,
