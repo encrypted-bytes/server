@@ -141,7 +141,7 @@ fastify.get('/download/:fileEncryptionKey/:fileIV/:encryptedFileData/:dataIV', a
         return reply.code(500).view('error.html', { errorMessage: 'This file has been removed', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
       }
 
-      if(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.txt', '.pdf', '.css', '.js'].includes(fileExtension)) {
+      if(['.png', '.jpg', '.jpeg', '.gif', '.txt', '.pdf', '.css', '.js', '.mp4', '.mp3'].includes(fileExtension)) {
         reply.header('Content-Disposition', `inline; filename="${fileName + fileExtension}"`);
       } else {
         reply.header('Content-Disposition', `attachment; filename="${fileName + fileExtension}"`);
