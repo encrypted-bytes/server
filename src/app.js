@@ -86,7 +86,7 @@ const getStats = async () => {
 
 fastify.post('/upload', async (request, reply) => {
   const data = await request.file();
-  if (!data.file || !data.file.size) {
+  if (!data.file || !data.file.bytesRead) {
     if (request.headers['user-agent'].toLowerCase().includes('curl')) {
       return reply.status(400).send('No file provided');
     }
