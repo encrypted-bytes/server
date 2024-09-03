@@ -23,7 +23,7 @@
     <hr>
     <h2>Upload</h2>
     <form action="/upload" method="post" enctype="multipart/form-data">
-        <input type="file" name="file" />
+        <input type="file" name="file" required />
         <button type="submit">Upload</button>
     </form>
     <hr>
@@ -37,7 +37,8 @@
     </ul>
     <blockquote>
         <p>Upload using CURL:</p>
-        <small>curl -X POST -H "Content-Type: multipart/form-data" -F "file=@****" https://encrypted-bytes.com/upload</small>
+        <small>curl -X POST -H "Content-Type: multipart/form-data" -F "file=@****"
+            https://encrypted-bytes.com/upload</small>
     </blockquote>
     <small><strong>2024-09-02</strong> Implemented file previews for common file types.</small>
 </body>

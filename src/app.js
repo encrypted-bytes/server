@@ -86,10 +86,12 @@ const getStats = async () => {
 
 fastify.post('/upload', async (request, reply) => {
   const data = await request.file();
-  if (!data) {
-    return reply.code(400).send('No file provided');
+  if (!data.file || !data.file.size) {
+    if (request.headers['user-agent'].toLowerCase().includes('curl')) {
+      return reply.status(400).send('No file provided');
+    }
+    return reply.code(400).view('error.html', { errorMessage: 'No file provided', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
   };
-
   const fileName = randomBytes(16).toString('hex');
   const fileKey = randomBytes(32);
   const fileIV = randomBytes(16);
@@ -116,9 +118,11 @@ fastify.post('/upload', async (request, reply) => {
     if (request.headers['user-agent'].toLowerCase().includes('curl')) {
       return reply.status(201).send((isHttps ? 'https' : 'http') + `://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`);
     }
-
     return reply.status(201).view('upload.html', { downloadLink: (isHttps ? 'https' : 'http') + `://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`, maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
   } catch (error) {
+    if (request.headers['user-agent'].toLowerCase().includes('curl')) {
+      return reply.status(500).send('File upload failed');
+    }
     return reply.code(500).view('error.html', { errorMessage: 'File upload failed', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
   }
 });
@@ -141,7 +145,7 @@ fastify.get('/download/:fileEncryptionKey/:fileIV/:encryptedFileData/:dataIV', a
         return reply.code(500).view('error.html', { errorMessage: 'This file has been removed', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
       }
 
-      if(['.png', '.jpg', '.jpeg', '.gif', '.txt', '.pdf', '.css', '.js', '.mp4', '.mp3'].includes(fileExtension)) {
+      if (['.png', '.jpg', '.jpeg', '.gif', '.txt', '.pdf', '.css', '.js', '.mp4', '.mp3'].includes(fileExtension)) {
         reply.header('Content-Disposition', `inline; filename="${fileName + fileExtension}"`);
       } else {
         reply.header('Content-Disposition', `attachment; filename="${fileName + fileExtension}"`);
@@ -149,9 +153,15 @@ fastify.get('/download/:fileEncryptionKey/:fileIV/:encryptedFileData/:dataIV', a
       const readStream = createReadStream(filePath);
       return reply.send(readStream.pipe(fileDecipher));
     } catch (error) {
+      if (request.headers['user-agent'].toLowerCase().includes('curl')) {
+        return reply.status(400).send('Invalid file data given');
+      }
       return reply.code(400).view('error.html', { errorMessage: 'Invalid file data given', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
     }
   } catch (er) {
+    if (request.headers['user-agent'].toLowerCase().includes('curl')) {
+      return reply.status(500).send('File decryption failed');
+    }
     return reply.code(500).view('error.html', { errorMessage: 'File decryption failed', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
   }
 });
