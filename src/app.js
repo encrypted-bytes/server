@@ -91,7 +91,15 @@ fastify.post('/upload', async (request, reply) => {
       return reply.status(400).send('No file provided');
     }
     return reply.code(400).view('error.html', { errorMessage: 'No file provided', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
-  };
+  }
+  
+  if (data.file.bytesRead > process.env.SERVER_MAX_UPLOAD * 1024 * 1024 * 1024) {
+    if (request.headers['user-agent'].toLowerCase().includes('curl')) {
+      return reply.status(413).send(`File size exceeds the maximum limit of ${process.env.SERVER_MAX_UPLOAD} GB`);
+    }
+    return reply.code(413).view('error.html', { errorMessage: `File size exceeds the maximum limit of ${process.env.SERVER_MAX_UPLOAD} GB`, maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
+  }
+  
   const fileName = randomBytes(16).toString('hex');
   const fileKey = randomBytes(32);
   const fileIV = randomBytes(16);

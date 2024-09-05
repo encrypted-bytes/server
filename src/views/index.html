@@ -22,10 +22,16 @@
     </blockquote>
     <hr>
     <h2>Upload</h2>
-    <form action="/upload" method="post" enctype="multipart/form-data">
-        <input type="file" name="file" required />
+    <form action="/upload" method="post" enctype="multipart/form-data" id="uploadForm">
+        <input type="file" name="file" required id="fileInput" />
         <button type="submit">Upload</button>
     </form>
+    <progress id="uploadProgress" value="0" max="100" style="width: 100%;" hidden></progress>
+    <small id="progressText" hidden></small>
+    <textarea rows="8" readonly hidden></textarea>
+    <noscript>
+        <small>Enable JavaScript for file upload progress.</small>
+    </noscript>
     <hr>
     <h3>Info</h3>
     <ul>
@@ -41,6 +47,7 @@
             https://encrypted-bytes.com/upload</small>
     </blockquote>
     <small><strong>2024-09-02</strong> Implemented file previews for common file types.</small>
+    <script src="/assets/js/scripts.js"></script>
 </body>
 
 </html>

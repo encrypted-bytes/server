@@ -1,4 +1,9 @@
 button,
 input[type="file"] {
     width: 100%;
+    margin-bottom: 10px;
+}
+
+progress {
+    width: 100%;
 }
