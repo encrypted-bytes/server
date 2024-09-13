@@ -87,14 +87,14 @@ const getStats = async () => {
 fastify.post('/upload', async (request, reply) => {
   const data = await request.file();
   if (!data.file || !data.file.bytesRead) {
-    if (request.headers['user-agent'].toLowerCase().includes('curl')) {
+    if (request.headers['user-agent'].toLowerCase().includes('curl') || request.headers['return-url']) {
       return reply.status(400).send('No file provided');
     }
     return reply.code(400).view('error.html', { errorMessage: 'No file provided', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
   }
   
   if (data.file.bytesRead > process.env.SERVER_MAX_UPLOAD * 1024 * 1024 * 1024) {
-    if (request.headers['user-agent'].toLowerCase().includes('curl')) {
+    if (request.headers['user-agent'].toLowerCase().includes('curl') || request.headers['return-url']) {
       return reply.status(413).send(`File size exceeds the maximum limit of ${process.env.SERVER_MAX_UPLOAD} GB`);
     }
     return reply.code(413).view('error.html', { errorMessage: `File size exceeds the maximum limit of ${process.env.SERVER_MAX_UPLOAD} GB`, maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
@@ -123,12 +123,12 @@ fastify.post('/upload', async (request, reply) => {
     let encryptedFileData = dataCipher.update(dataToEncrypt, 'utf8', 'hex');
     encryptedFileData += dataCipher.final('hex');
 
-    if (request.headers['user-agent'].toLowerCase().includes('curl')) {
-      return reply.status(201).send((isHttps ? 'https' : 'http') + `://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`);
+    if (request.headers['user-agent'].toLowerCase().includes('curl') || request.headers['return-url']) {
+      return reply.status(201).send((process.env.SERVER_ENV !== 'DEV' && isHttps ? 'https' : 'http') + `://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`);
     }
-    return reply.status(201).view('upload.html', { downloadLink: (isHttps ? 'https' : 'http') + `://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`, maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
+    return reply.status(201).view('upload.html', { downloadLink: (process.env.SERVER_ENV !== 'DEV' && isHttps ? 'https' : 'http') + `://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`, maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
   } catch (error) {
-    if (request.headers['user-agent'].toLowerCase().includes('curl')) {
+    if (request.headers['user-agent'].toLowerCase().includes('curl') || request.headers['return-url']) {
       return reply.status(500).send('File upload failed');
     }
     return reply.code(500).view('error.html', { errorMessage: 'File upload failed', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
