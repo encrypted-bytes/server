@@ -153,11 +153,28 @@ fastify.get('/download/:fileEncryptionKey/:fileIV/:encryptedFileData/:dataIV', a
         return reply.code(500).view('error.html', { errorMessage: 'This file has been removed', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
       }
 
-      if (['.png', '.jpg', '.jpeg', '.gif', '.txt', '.pdf', '.css', '.js', '.mp4', '.mp3'].includes(fileExtension)) {
+      const mimeTypes = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.txt': 'text/plain',
+        '.pdf': 'application/pdf',
+        '.css': 'text/css',
+        '.js': 'application/javascript',
+        '.mp4': 'video/mp4',
+        '.mp3': 'audio/mpeg'
+      };
+
+      const mimeType = mimeTypes[fileExtension.toLowerCase()];
+
+      if (mimeType) {
+        reply.header('Content-Type', mimeType);
         reply.header('Content-Disposition', `inline; filename="${fileName + fileExtension}"`);
       } else {
         reply.header('Content-Disposition', `attachment; filename="${fileName + fileExtension}"`);
       }
+
       const readStream = createReadStream(filePath);
       return reply.send(readStream.pipe(fileDecipher));
     } catch (error) {
