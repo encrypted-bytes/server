@@ -3,3 +3,4 @@ temp
 ssl
 .env
 node_modules
+src/stats.json
