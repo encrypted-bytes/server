@@ -201,19 +201,23 @@ cron.schedule('* * * * *', () => {
 const start = async () => {
   try {
     if (process.env.SERVER_ENV !== 'DEV' && isHttps) {
-      http.createServer((req, res) => {
+      const httpServer = http.createServer((req, res) => {
         res.writeHead(301, { "Location": "https://" + req.headers['host'] + req.url });
         res.end();
-      }).listen(80);
-      console.log('HTTP redirect server running on port 80');
+      });
+      
+      httpServer.listen(80, '0.0.0.0');
+      httpServer.listen(80, '::');
+      console.log('HTTP redirect server running on port 80 (IPv4 & IPv6)');
     }
 
     const port = process.env.SERVER_ENV === 'DEV' ? 5000 : isHttps ? 443 : 80;
     await fastify.listen({
       port: port,
-      host: '0.0.0.0'
+      host: '::',
+      ipv6Only: false
     });
-    console.log(`Server is running on port ${port}`);
+    console.log(`Server is running on port ${port} (IPv4 & IPv6)`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
