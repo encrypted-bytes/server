@@ -34,7 +34,7 @@ try {
   console.warn('SSL certificates not found or invalid. Falling back to HTTP.');
 }
 const fastify = Fastify({
-  logger: false,//process.env.SERVER_ENV === 'DEV' ? true : false,
+  logger: process.env.SERVER_ENV === 'DEV' ? true : false,
   maxParamLength: 1000,
   https: process.env.SERVER_ENV === 'DEV' ? undefined : isHttps ? httpsOptions : undefined
 });
