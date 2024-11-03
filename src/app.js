@@ -104,17 +104,14 @@ fastify.post('/upload', async (request, reply) => {
   let fileKey, fileIV;
 
   if (request.headers['x-client-encrypted']) {
-    // Client-side encrypted file
-    fileKey = Buffer.from(data.fields.key.value, 'hex');
-    fileIV = Buffer.from(data.fields.iv.value, 'hex');
+    fileKey = Buffer.from(request.headers['x-encryption-key'], 'hex');
+    fileIV = Buffer.from(request.headers['x-encryption-iv'], 'hex');
     
-    // Store file directly without server-side encryption
     await pipeline(
       data.file,
       createWriteStream(path.join(filesDir, fileName))
     );
   } else {
-    // Server-side encryption (existing logic)
     fileKey = randomBytes(32);
     fileIV = randomBytes(16);
     const fileCipher = createCipheriv('aes-256-cbc', fileKey, fileIV);
