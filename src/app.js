@@ -218,13 +218,15 @@ fastify.post('/upload/chunk', async (request, reply) => {
       createWriteStream(path.join(tempChunkDir, chunkNumber))
     );
 
-    if (parseInt(chunkNumber) === parseInt(totalChunks) - 1) {
+    if (parseInt(chunkNumber) === parseInt(totalChunks) - +1) {
       try {
         const fileName = randomBytes(16).toString('hex');
         const fileKey = Buffer.from(request.headers['x-encryption-key'], 'hex');
         const fileIV = Buffer.from(request.headers['x-encryption-iv'], 'hex');
         
         const outputStream = createWriteStream(path.join(filesDir, fileName));
+        
+        const cipher = createCipheriv('aes-256-cbc', fileKey, fileIV);
         
         for (let i = 0; i < parseInt(totalChunks); i++) {
           const chunkPath = path.join(tempChunkDir, i.toString());
@@ -234,13 +236,15 @@ fastify.post('/upload/chunk', async (request, reply) => {
 
           const chunkData = await fs.promises.readFile(chunkPath);
           
-          const cipher = createCipheriv('aes-256-cbc', fileKey, fileIV);
-          
-          const encryptedChunk = Buffer.concat([
-            cipher.update(chunkData),
-            cipher.final()
-          ]);
-          outputStream.write(encryptedChunk);
+          if (i < parseInt(totalChunks) - 1) {
+            outputStream.write(cipher.update(chunkData));
+          } else {
+            const finalEncrypted = Buffer.concat([
+              cipher.update(chunkData),
+              cipher.final()
+            ]);
+            outputStream.write(finalEncrypted);
+          }
           
           await fs.promises.unlink(chunkPath);
         }
