@@ -34,7 +34,7 @@ try {
   console.warn('SSL certificates not found or invalid. Falling back to HTTP.');
 }
 const fastify = Fastify({
-  logger: process.env.SERVER_ENV === 'DEV' ? true : false,
+  logger: false,//process.env.SERVER_ENV === 'DEV' ? true : false,
   maxParamLength: 1000,
   https: process.env.SERVER_ENV === 'DEV' ? undefined : isHttps ? httpsOptions : undefined
 });
@@ -103,15 +103,6 @@ fastify.post('/upload', async (request, reply) => {
   const fileName = randomBytes(16).toString('hex');
   let fileKey, fileIV;
 
-  if (request.headers['x-client-encrypted']) {
-    fileKey = Buffer.from(request.headers['x-encryption-key'], 'hex');
-    fileIV = Buffer.from(request.headers['x-encryption-iv'], 'hex');
-    
-    await pipeline(
-      data.file,
-      createWriteStream(path.join(filesDir, fileName))
-    );
-  } else {
     fileKey = randomBytes(32);
     fileIV = randomBytes(16);
     const fileCipher = createCipheriv('aes-256-cbc', fileKey, fileIV);
@@ -121,7 +112,6 @@ fastify.post('/upload', async (request, reply) => {
       fileCipher,
       createWriteStream(path.join(filesDir, fileName))
     );
-  }
 
   const dataToEncrypt = JSON.stringify({ 
     fileName: fileName, 
@@ -198,6 +188,106 @@ fastify.get('/download/:fileEncryptionKey/:fileIV/:encryptedFileData/:dataIV', a
       return reply.status(500).send('File decryption failed');
     }
     return reply.code(500).view('error.html', { errorMessage: 'File decryption failed', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
+  }
+});
+
+fastify.post('/upload/chunk', async (request, reply) => {
+  try {
+    const data = await request.file();
+    
+    if (!data || !data.file) {
+      return reply.status(400).send('No chunk provided');
+    }
+
+    const chunkNumber = request.headers['x-chunk-number'];
+    const totalChunks = request.headers['x-total-chunks'];
+    const fileId = request.headers['x-file-id'];
+    
+    if (!chunkNumber || !totalChunks || !fileId) {
+      return reply.status(400).send('Missing chunk metadata');
+    }
+
+    const tempChunkDir = path.join(tempDir, fileId);
+    
+    if (!fs.existsSync(tempChunkDir)) {
+      await fs.promises.mkdir(tempChunkDir, { recursive: true });
+    }
+
+    await pipeline(
+      data.file,
+      createWriteStream(path.join(tempChunkDir, chunkNumber))
+    );
+
+    if (parseInt(chunkNumber) === parseInt(totalChunks) - 1) {
+      try {
+        const fileName = randomBytes(16).toString('hex');
+        const fileKey = Buffer.from(request.headers['x-encryption-key'], 'hex');
+        const fileIV = Buffer.from(request.headers['x-encryption-iv'], 'hex');
+        
+        const writeStream = createWriteStream(path.join(filesDir, fileName));
+        const buffers = [];
+
+        try {
+            for (let i = 0; i < parseInt(totalChunks); i++) {
+                const chunkPath = path.join(tempChunkDir, i.toString());
+                if (!fs.existsSync(chunkPath)) {
+                    throw new Error(`Missing chunk file: ${i}`);
+                }
+                const chunkData = await fs.promises.readFile(chunkPath);
+                buffers.push(chunkData);
+                await fs.promises.unlink(chunkPath);
+            }
+            
+            const combinedBuffer = Buffer.concat(buffers);
+            const cipher = createCipheriv('aes-256-cbc', fileKey, fileIV);
+            const encryptedData = Buffer.concat([cipher.update(combinedBuffer), cipher.final()]);
+            
+            writeStream.write(encryptedData);
+            writeStream.end();
+            
+            await new Promise((resolve, reject) => {
+                writeStream.on('finish', resolve);
+                writeStream.on('error', reject);
+            });
+        } finally {
+            writeStream.end();
+        }
+        
+        await fs.promises.rmdir(tempChunkDir);
+
+        const dataToEncrypt = JSON.stringify({ 
+          fileName: fileName, 
+          fileExtension: path.extname(data.filename),
+          clientEncrypted: true
+        });
+        
+        const dataIV = randomBytes(16);
+        const dataCipher = createCipheriv('aes-256-cbc', Buffer.from(serverSecretKey), dataIV);
+        let encryptedFileData = dataCipher.update(dataToEncrypt, 'utf8', 'hex');
+        encryptedFileData += dataCipher.final('hex');
+
+        return reply.status(201).send(`${process.env.SERVER_ENV !== 'DEV' && isHttps ? 'https' : 'http'}://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`);
+      } catch (error) {
+        console.error('Error processing final chunk:', error);
+        try {
+          if (fs.existsSync(tempChunkDir)) {
+            const files = await fs.promises.readdir(tempChunkDir);
+            for (const file of files) {
+              await fs.promises.unlink(path.join(tempChunkDir, file));
+            }
+            await fs.promises.rmdir(tempChunkDir);
+          }
+        } catch (cleanupError) {
+          console.error('Error cleaning up after failure:', cleanupError);
+        }
+        throw error;
+      }
+    }
+
+    return reply.status(200).send(`Received chunk ${parseInt(chunkNumber) + 1}/${parseInt(totalChunks)}`);
+  } catch (error) {
+    console.error('Chunk upload error:', error);
+    return reply.status(500).send('Internal server error during chunk upload');
   }
 });
 
