@@ -21,7 +21,7 @@ document.querySelector('form').addEventListener('submit', async function(e) {
     statusText.hidden = false;
 
     try {
-        const CHUNK_SIZE = 250 * 1024 * 1024;
+        const CHUNK_SIZE = 25 * 1024 * 1024; //TODO figure out a good chunk size
         const file = fileInput.files[0];
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
         const fileId = Array.from(crypto.getRandomValues(new Uint8Array(16)))

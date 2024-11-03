@@ -224,34 +224,33 @@ fastify.post('/upload/chunk', async (request, reply) => {
         const fileKey = Buffer.from(request.headers['x-encryption-key'], 'hex');
         const fileIV = Buffer.from(request.headers['x-encryption-iv'], 'hex');
         
-        const writeStream = createWriteStream(path.join(filesDir, fileName));
-        const buffers = [];
+        const outputStream = createWriteStream(path.join(filesDir, fileName));
+        
+        for (let i = 0; i < parseInt(totalChunks); i++) {
+          const chunkPath = path.join(tempChunkDir, i.toString());
+          if (!fs.existsSync(chunkPath)) {
+            throw new Error(`Missing chunk file: ${i}`);
+          }
 
-        try {
-            for (let i = 0; i < parseInt(totalChunks); i++) {
-                const chunkPath = path.join(tempChunkDir, i.toString());
-                if (!fs.existsSync(chunkPath)) {
-                    throw new Error(`Missing chunk file: ${i}`);
-                }
-                const chunkData = await fs.promises.readFile(chunkPath);
-                buffers.push(chunkData);
-                await fs.promises.unlink(chunkPath);
-            }
-            
-            const combinedBuffer = Buffer.concat(buffers);
-            const cipher = createCipheriv('aes-256-cbc', fileKey, fileIV);
-            const encryptedData = Buffer.concat([cipher.update(combinedBuffer), cipher.final()]);
-            
-            writeStream.write(encryptedData);
-            writeStream.end();
-            
-            await new Promise((resolve, reject) => {
-                writeStream.on('finish', resolve);
-                writeStream.on('error', reject);
-            });
-        } finally {
-            writeStream.end();
+          const chunkData = await fs.promises.readFile(chunkPath);
+          
+          const cipher = createCipheriv('aes-256-cbc', fileKey, fileIV);
+          
+          const encryptedChunk = Buffer.concat([
+            cipher.update(chunkData),
+            cipher.final()
+          ]);
+          outputStream.write(encryptedChunk);
+          
+          await fs.promises.unlink(chunkPath);
         }
+        
+        outputStream.end();
+        
+        await new Promise((resolve, reject) => {
+          outputStream.on('finish', resolve);
+          outputStream.on('error', reject);
+        });
         
         await fs.promises.rmdir(tempChunkDir);
 
