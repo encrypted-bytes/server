@@ -8,6 +8,7 @@ document.querySelector('form').addEventListener('submit', async function(e) {
     let fileInput = document.querySelector('input[type="file"]');
     let textArea = document.querySelector('textarea');
     let submitButton = document.querySelector('button[type="submit"]');
+    let statusText = document.getElementById('statusText');
 
     if (!fileInput.files[0]) {
         alert('Please select a file');
@@ -19,6 +20,9 @@ document.querySelector('form').addEventListener('submit', async function(e) {
     xhr.setRequestHeader('return-url', '1');
 
     try {
+        statusText.textContent = 'Your file is being encrypted...';
+        statusText.hidden = false;
+        
         const key = await window.crypto.subtle.generateKey(
             { name: "AES-CBC", length: 256 },
             true,
@@ -31,8 +35,14 @@ document.querySelector('form').addEventListener('submit', async function(e) {
         xhr.setRequestHeader('X-Encryption-IV', Array.from(iv).map(b => b.toString(16).padStart(2, '0')).join(''));
         xhr.setRequestHeader('X-Encryption-Key', Array.from(new Uint8Array(exportedKey)).map(b => b.toString(16).padStart(2, '0')).join(''));
 
+        let isFirstProgress = true;
+        
         xhr.upload.onprogress = function(e) {
             if (e.lengthComputable) {
+                if (isFirstProgress) {
+                    statusText.hidden = true;
+                    isFirstProgress = false;
+                }
                 submitButton.disabled = true;
                 fileInput.disabled = true;
                 let percentComplete = (e.loaded / e.total) * 100;
@@ -67,12 +77,13 @@ document.querySelector('form').addEventListener('submit', async function(e) {
         let formData = new FormData();
         const encryptedBlob = new Blob([encryptedContent], { type: 'application/octet-stream' });
         formData.append('file', encryptedBlob, fileInput.files[0].name);
-        
+        statusText.textContent = 'Your file is being prepared for upload...';
         xhr.send(formData);
     } catch (error) {
         console.error('Encryption error:', error);
         alert('Encryption failed. Please try again.');
         submitButton.disabled = false;
         fileInput.disabled = false;
+        statusText.hidden = true;
     }
 });
