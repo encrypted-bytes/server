@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import Fastify from 'fastify';
 import fastifyMultipart from '@fastify/multipart';
-import fs from 'fs';
+import fs from 'fs/promises';
+import { createReadStream, createWriteStream, existsSync } from 'fs';
 import crypto, { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 import fastifyStatic from '@fastify/static';
 import path, { dirname } from 'path';
@@ -11,7 +12,6 @@ import ejs from 'ejs';
 import cron from 'node-cron';
 import cleanup from './cron/cleanup.js';
 import { pipeline } from 'stream/promises';
-import { createWriteStream, createReadStream } from 'fs';
 import http from 'http';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -26,15 +26,15 @@ let httpsOptions;
 let isHttps = true;
 try {
   httpsOptions = {
-    key: fs.readFileSync(__dirname + '/../ssl/privkey.pem'),
-    cert: fs.readFileSync(__dirname + '/../ssl/cert.pem')
+    key: await fs.readFile(__dirname + '/../ssl/privkey.pem'),
+    cert: await fs.readFile(__dirname + '/../ssl/cert.pem')
   };
 } catch (error) {
   console.error(error);
   console.warn('SSL certificates not found or invalid. Falling back to HTTP.');
 }
 const fastify = Fastify({
-  logger: process.env.SERVER_ENV === 'DEV' ? true : false,
+  logger: false,
   maxParamLength: 1000,
   https: process.env.SERVER_ENV === 'DEV' ? undefined : isHttps ? httpsOptions : undefined
 });
@@ -73,7 +73,7 @@ fastify.setNotFoundHandler((request, reply) => {
 const getStats = async () => {
   const statsFilePath = path.join(__dirname, 'stats.json');
   try {
-    const data = await fs.promises.readFile(statsFilePath, 'utf8');
+    const data = await fs.readFile(statsFilePath, 'utf8');
     return JSON.parse(data);
   } catch (error) {
     return {
@@ -83,28 +83,20 @@ const getStats = async () => {
   }
 };
 
-
 fastify.post('/upload', async (request, reply) => {
-  const data = await request.file();
-  if (!data.file || !data.file.bytesRead) {
-    if (request.headers['user-agent'].toLowerCase().includes('curl') || request.headers['return-url']) {
-      return reply.status(400).send('No file provided');
+  try {
+    const data = await request.file();
+    if (!data.file || !data.file.bytesRead) {
+      return handleError(reply, 'No file provided', 400);
     }
-    return reply.code(400).view('error.html', { errorMessage: 'No file provided', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
-  }
-  
-  if (data.file.bytesRead > process.env.SERVER_MAX_UPLOAD * 1024 * 1024 * 1024) {
-    if (request.headers['user-agent'].toLowerCase().includes('curl') || request.headers['return-url']) {
-      return reply.status(413).send(`File size exceeds the maximum limit of ${process.env.SERVER_MAX_UPLOAD} GB`);
+    
+    if (data.file.bytesRead > process.env.SERVER_MAX_UPLOAD * 1024 * 1024 * 1024) {
+      return handleError(reply, `File size exceeds the maximum limit of ${process.env.SERVER_MAX_UPLOAD} GB`, 413);
     }
-    return reply.code(413).view('error.html', { errorMessage: `File size exceeds the maximum limit of ${process.env.SERVER_MAX_UPLOAD} GB`, maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
-  }
-  
-  const fileName = randomBytes(16).toString('hex');
-  let fileKey, fileIV;
-
-    fileKey = randomBytes(32);
-    fileIV = randomBytes(16);
+    
+    const fileName = randomBytes(16).toString('hex');
+    const fileKey = randomBytes(32);
+    const fileIV = randomBytes(16);
     const fileCipher = createCipheriv('aes-256-cbc', fileKey, fileIV);
     
     await pipeline(
@@ -113,26 +105,32 @@ fastify.post('/upload', async (request, reply) => {
       createWriteStream(path.join(filesDir, fileName))
     );
 
-  const dataToEncrypt = JSON.stringify({ 
-    fileName: fileName, 
-    fileExtension: path.extname(data.filename),
-    clientEncrypted: !!request.headers['x-client-encrypted']
-  });
-  
-  const dataIV = randomBytes(16);
-  const dataCipher = createCipheriv('aes-256-cbc', Buffer.from(serverSecretKey), dataIV);
-  let encryptedFileData = dataCipher.update(dataToEncrypt, 'utf8', 'hex');
-  encryptedFileData += dataCipher.final('hex');
+    const dataToEncrypt = JSON.stringify({ 
+      fileName: fileName, 
+      fileExtension: path.extname(data.filename),
+      clientEncrypted: !!request.headers['x-client-encrypted']
+    });
+    
+    const dataIV = randomBytes(16);
+    const dataCipher = createCipheriv('aes-256-cbc', Buffer.from(serverSecretKey), dataIV);
+    let encryptedFileData = dataCipher.update(dataToEncrypt, 'utf8', 'hex');
+    encryptedFileData += dataCipher.final('hex');
 
-  if (request.headers['user-agent'].toLowerCase().includes('curl') || request.headers['return-url']) {
-    return reply.status(201).send(`${process.env.SERVER_ENV !== 'DEV' && isHttps ? 'https' : 'http'}://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`);
+    const downloadLink = `${process.env.SERVER_ENV !== 'DEV' && isHttps ? 'https' : 'http'}://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`;
+    
+    if (request.headers['user-agent'].toLowerCase().includes('curl') || request.headers['return-url']) {
+      return reply.status(201).send(downloadLink);
+    }
+    
+    return reply.status(201).view('upload.html', { 
+      downloadLink,
+      maxSize: process.env.SERVER_MAX_UPLOAD,
+      stats: await getStats()
+    });
+  } catch (error) {
+    console.error('Error during file upload:', error);
+    return handleError(reply, 'Internal server error during file upload', 500);
   }
-  
-  return reply.status(201).view('upload.html', { 
-    downloadLink: `${process.env.SERVER_ENV !== 'DEV' && isHttps ? 'https' : 'http'}://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`,
-    maxSize: process.env.SERVER_MAX_UPLOAD,
-    stats: await getStats()
-  });
 });
 
 fastify.get('/download/:fileEncryptionKey/:fileIV/:encryptedFileData/:dataIV', async (request, reply) => {
@@ -144,50 +142,41 @@ fastify.get('/download/:fileEncryptionKey/:fileIV/:encryptedFileData/:dataIV', a
     decryptedData += dataDecipher.final('utf8');
     const { fileName, fileExtension } = JSON.parse(decryptedData);
 
-    try {
-      const fileKey = Buffer.from(fileEncryptionKey, 'hex');
-      const fileIVBuffer = Buffer.from(fileIV, 'hex');
-      const fileDecipher = createDecipheriv('aes-256-cbc', fileKey, fileIVBuffer);
-      const filePath = path.join(filesDir, fileName);
-      if (!fs.existsSync(filePath)) {
-        return reply.code(500).view('error.html', { errorMessage: 'This file has been removed', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
-      }
-
-      const mimeTypes = {
-        '.png': 'image/png',
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.gif': 'image/gif',
-        '.txt': 'text/plain',
-        '.pdf': 'application/pdf',
-        '.css': 'text/css',
-        '.js': 'application/javascript',
-        '.mp4': 'video/mp4',
-        '.mp3': 'audio/mpeg'
-      };
-
-      const mimeType = mimeTypes[fileExtension.toLowerCase()];
-
-      if (mimeType) {
-        reply.header('Content-Type', mimeType);
-        reply.header('Content-Disposition', `inline; filename="${fileName + fileExtension}"`);
-      } else {
-        reply.header('Content-Disposition', `attachment; filename="${fileName + fileExtension}"`);
-      }
-
-      const readStream = createReadStream(filePath);
-      return reply.send(readStream.pipe(fileDecipher));
-    } catch (error) {
-      if (request.headers['user-agent'].toLowerCase().includes('curl')) {
-        return reply.status(400).send('Invalid file data given');
-      }
-      return reply.code(400).view('error.html', { errorMessage: 'Invalid file data given', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
+    const fileKey = Buffer.from(fileEncryptionKey, 'hex');
+    const fileIVBuffer = Buffer.from(fileIV, 'hex');
+    const fileDecipher = createDecipheriv('aes-256-cbc', fileKey, fileIVBuffer);
+    const filePath = path.join(filesDir, fileName);
+    if (!existsSync(filePath)) {
+      return handleError(reply, 'This file has been removed', 404);
     }
-  } catch (er) {
-    if (request.headers['user-agent'].toLowerCase().includes('curl')) {
-      return reply.status(500).send('File decryption failed');
+
+    const mimeTypes = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.txt': 'text/plain',
+      '.pdf': 'application/pdf',
+      '.css': 'text/css',
+      '.js': 'application/javascript',
+      '.mp4': 'video/mp4',
+      '.mp3': 'audio/mpeg'
+    };
+
+    const mimeType = mimeTypes[fileExtension.toLowerCase()];
+
+    if (mimeType) {
+      reply.header('Content-Type', mimeType);
+      reply.header('Content-Disposition', `inline; filename="${fileName + fileExtension}"`);
+    } else {
+      reply.header('Content-Disposition', `attachment; filename="${fileName + fileExtension}"`);
     }
-    return reply.code(500).view('error.html', { errorMessage: 'File decryption failed', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
+
+    const readStream = createReadStream(filePath);
+    return reply.send(readStream.pipe(fileDecipher));
+  } catch (error) {
+    console.error('Error during file decryption or streaming:', error);
+    return handleError(reply, 'Invalid file data given', 400);
   }
 });
 
@@ -209,8 +198,8 @@ fastify.post('/upload/chunk', async (request, reply) => {
 
     const tempChunkDir = path.join(tempDir, fileId);
     
-    if (!fs.existsSync(tempChunkDir)) {
-      await fs.promises.mkdir(tempChunkDir, { recursive: true });
+    if (!existsSync(tempChunkDir)) {
+      await fs.mkdir(tempChunkDir, { recursive: true });
     }
 
     await pipeline(
@@ -218,7 +207,7 @@ fastify.post('/upload/chunk', async (request, reply) => {
       createWriteStream(path.join(tempChunkDir, chunkNumber))
     );
 
-    if (parseInt(chunkNumber) === parseInt(totalChunks) - +1) {
+    if (parseInt(chunkNumber) === parseInt(totalChunks) - 1) {
       try {
         const fileName = randomBytes(16).toString('hex');
         const fileKey = Buffer.from(request.headers['x-encryption-key'], 'hex');
@@ -230,11 +219,11 @@ fastify.post('/upload/chunk', async (request, reply) => {
         
         for (let i = 0; i < parseInt(totalChunks); i++) {
           const chunkPath = path.join(tempChunkDir, i.toString());
-          if (!fs.existsSync(chunkPath)) {
+          if (!existsSync(chunkPath)) {
             throw new Error(`Missing chunk file: ${i}`);
           }
 
-          const chunkData = await fs.promises.readFile(chunkPath);
+          const chunkData = await fs.readFile(chunkPath);
           
           if (i < parseInt(totalChunks) - 1) {
             outputStream.write(cipher.update(chunkData));
@@ -246,9 +235,8 @@ fastify.post('/upload/chunk', async (request, reply) => {
             outputStream.write(finalEncrypted);
           }
           
-          await fs.promises.unlink(chunkPath);
+          await fs.unlink(chunkPath);
         }
-        
         outputStream.end();
         
         await new Promise((resolve, reject) => {
@@ -256,7 +244,7 @@ fastify.post('/upload/chunk', async (request, reply) => {
           outputStream.on('error', reject);
         });
         
-        await fs.promises.rmdir(tempChunkDir);
+        await fs.rmdir(tempChunkDir);
 
         const dataToEncrypt = JSON.stringify({ 
           fileName: fileName, 
@@ -272,21 +260,10 @@ fastify.post('/upload/chunk', async (request, reply) => {
         return reply.status(201).send(`${process.env.SERVER_ENV !== 'DEV' && isHttps ? 'https' : 'http'}://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`);
       } catch (error) {
         console.error('Error processing final chunk:', error);
-        try {
-          if (fs.existsSync(tempChunkDir)) {
-            const files = await fs.promises.readdir(tempChunkDir);
-            for (const file of files) {
-              await fs.promises.unlink(path.join(tempChunkDir, file));
-            }
-            await fs.promises.rmdir(tempChunkDir);
-          }
-        } catch (cleanupError) {
-          console.error('Error cleaning up after failure:', cleanupError);
-        }
-        throw error;
+        await cleanupTempDir(tempChunkDir);
+        return reply.status(500).send('Internal server error during final chunk processing');
       }
     }
-
     return reply.status(200).send(`Received chunk ${parseInt(chunkNumber) + 1}/${parseInt(totalChunks)}`);
   } catch (error) {
     console.error('Chunk upload error:', error);
@@ -327,3 +304,22 @@ const start = async () => {
   }
 };
 start();
+
+async function handleError(reply, message, statusCode) {
+  console.error(message);
+  return reply.code(statusCode).view('error.html', { 
+    errorMessage: message, 
+    maxSize: process.env.SERVER_MAX_UPLOAD, 
+    stats: await getStats() 
+  });
+}
+
+async function cleanupTempDir(tempChunkDir) {
+  if (existsSync(tempChunkDir)) {
+    const files = await fs.readdir(tempChunkDir);
+    for (const file of files) {
+      await fs.unlink(path.join(tempChunkDir, file));
+    }
+    await fs.rmdir(tempChunkDir);
+  }
+}
