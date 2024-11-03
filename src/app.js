@@ -101,38 +101,51 @@ fastify.post('/upload', async (request, reply) => {
   }
   
   const fileName = randomBytes(16).toString('hex');
-  const fileKey = randomBytes(32);
-  const fileIV = randomBytes(16);
-  const fileCipher = createCipheriv('aes-256-cbc', fileKey, fileIV);
+  let fileKey, fileIV;
 
-  const fileTempPath = path.join(tempDir, `${randomBytes(16).toString('hex')}`);
-
-  try {
-    await fs.promises.mkdir(tempDir, { recursive: true });
-    await fs.promises.mkdir(filesDir, { recursive: true });
+  if (request.headers['x-client-encrypted']) {
+    // Client-side encrypted file
+    fileKey = Buffer.from(data.fields.key.value, 'hex');
+    fileIV = Buffer.from(data.fields.iv.value, 'hex');
+    
+    // Store file directly without server-side encryption
+    await pipeline(
+      data.file,
+      createWriteStream(path.join(filesDir, fileName))
+    );
+  } else {
+    // Server-side encryption (existing logic)
+    fileKey = randomBytes(32);
+    fileIV = randomBytes(16);
+    const fileCipher = createCipheriv('aes-256-cbc', fileKey, fileIV);
+    
     await pipeline(
       data.file,
       fileCipher,
-      createWriteStream(fileTempPath)
+      createWriteStream(path.join(filesDir, fileName))
     );
-    await fs.promises.rename(fileTempPath, path.join(filesDir, fileName));
-
-    const dataToEncrypt = JSON.stringify({ fileName: fileName, fileExtension: path.extname(data.filename) });
-    const dataIV = randomBytes(16);
-    const dataCipher = createCipheriv('aes-256-cbc', Buffer.from(serverSecretKey), dataIV);
-    let encryptedFileData = dataCipher.update(dataToEncrypt, 'utf8', 'hex');
-    encryptedFileData += dataCipher.final('hex');
-
-    if (request.headers['user-agent'].toLowerCase().includes('curl') || request.headers['return-url']) {
-      return reply.status(201).send((process.env.SERVER_ENV !== 'DEV' && isHttps ? 'https' : 'http') + `://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`);
-    }
-    return reply.status(201).view('upload.html', { downloadLink: (process.env.SERVER_ENV !== 'DEV' && isHttps ? 'https' : 'http') + `://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`, maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
-  } catch (error) {
-    if (request.headers['user-agent'].toLowerCase().includes('curl') || request.headers['return-url']) {
-      return reply.status(500).send('File upload failed');
-    }
-    return reply.code(500).view('error.html', { errorMessage: 'File upload failed', maxSize: process.env.SERVER_MAX_UPLOAD, stats: await getStats() });
   }
+
+  const dataToEncrypt = JSON.stringify({ 
+    fileName: fileName, 
+    fileExtension: path.extname(data.filename),
+    clientEncrypted: !!request.headers['x-client-encrypted']
+  });
+  
+  const dataIV = randomBytes(16);
+  const dataCipher = createCipheriv('aes-256-cbc', Buffer.from(serverSecretKey), dataIV);
+  let encryptedFileData = dataCipher.update(dataToEncrypt, 'utf8', 'hex');
+  encryptedFileData += dataCipher.final('hex');
+
+  if (request.headers['user-agent'].toLowerCase().includes('curl') || request.headers['return-url']) {
+    return reply.status(201).send(`${process.env.SERVER_ENV !== 'DEV' && isHttps ? 'https' : 'http'}://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`);
+  }
+  
+  return reply.status(201).view('upload.html', { 
+    downloadLink: `${process.env.SERVER_ENV !== 'DEV' && isHttps ? 'https' : 'http'}://${request.headers.host}/download/${fileKey.toString('hex')}/${fileIV.toString('hex')}/${encryptedFileData}/${dataIV.toString('hex')}`,
+    maxSize: process.env.SERVER_MAX_UPLOAD,
+    stats: await getStats()
+  });
 });
 
 fastify.get('/download/:fileEncryptionKey/:fileIV/:encryptedFileData/:dataIV', async (request, reply) => {

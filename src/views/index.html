@@ -24,6 +24,9 @@
     <h2>Upload</h2>
     <form action="/upload" method="post" enctype="multipart/form-data" id="uploadForm">
         <input type="file" name="file" required id="fileInput" />
+        <label>
+            <input type="checkbox" id="clientEncryption" checked> Enable client-side encryption
+        </label>
         <button type="submit">Upload</button>
     </form>
     <progress id="uploadProgress" value="0" max="100" style="width: 100%;" hidden></progress>
