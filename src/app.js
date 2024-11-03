@@ -264,7 +264,7 @@ fastify.post('/upload/chunk', async (request, reply) => {
         return reply.status(500).send('Internal server error during final chunk processing');
       }
     }
-    return reply.status(200).send(`Received chunk ${parseInt(chunkNumber) + 1}/${parseInt(totalChunks)}`);
+    return reply.status(200).send(`Processing chunk ${parseInt(chunkNumber) + 1}/${parseInt(totalChunks)}`);
   } catch (error) {
     console.error('Chunk upload error:', error);
     return reply.status(500).send('Internal server error during chunk upload');

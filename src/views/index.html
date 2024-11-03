@@ -31,15 +31,14 @@
     <small id="progressText" hidden></small>
     <textarea rows="8" readonly hidden></textarea>
     <noscript>
-        <small>Enable JavaScript for E2E encryption and file upload progress.</small>
+        <small>Enable JS for E2E encryption, chunked uploads and upload progress.</small>
     </noscript>
     <hr>
     <h3>Info</h3>
     <ul>
         <li><%= maxSize %> GB file size limit</li>
         <li>All files are encrypted using AES-256-CBC.</li>
-        <noscript>Please enable Javascript for E2E encrypted uploads.</noscript>
-        <noscript>Files are encrypted server-side.</noscript>
+        <noscript><li>Files are encrypted server-side.</li></noscript>
         <li id="e2eMessage" hidden>Files are E2E encrypted.</li>
         <li>No logs or decryption keys are stored by us.</li>
     </ul>
@@ -48,7 +47,7 @@
         <small>curl -k -X POST -H "Content-Type: multipart/form-data" -F "file=@****"
             https://encrypted-bytes.com/upload</small>
     </blockquote>
-    <small><strong>2024-10-03</strong> Implemented E2E file encryption when JS is enabled.</small>
+    <small><strong>2024-10-03</strong> Implemented E2E file encryption and chunked uploads when JS is enabled.</small>
     <script src="/assets/js/scripts.js"></script>
 </body>
 
